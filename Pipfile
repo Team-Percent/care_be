@@ -44,7 +44,7 @@ requests = "==2.32.5"
 simplejson = "==3.20.2"
 sentry-sdk = "==2.47.0"
 whitenoise = "==6.11.0"
-pydantic-extra-types = "==2.10.6"
+pydantic-extra-types = "==2.11.0"
 phonenumberslite = "==9.0.19"
 python-magic = {version = "==0.4.28", index = "python-magic-bin"}
 django-import-export = "==4.3.14"
