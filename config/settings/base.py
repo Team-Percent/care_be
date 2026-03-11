@@ -79,25 +79,40 @@ LOCK_TIMEOUT = env.int("LOCK_TIMEOUT", default=32)
 
 REDIS_URL = env("REDIS_URL", default="redis://localhost:6379")
 
+# Dev-lite mode: use in-memory cache instead of Redis
+CARE_USE_LOCMEM_CACHE = env.bool("CARE_USE_LOCMEM_CACHE", default=False)
+
 # CACHES
 # ------------------------------------------------------------------------------
 # https://docs.djangoproject.com/en/dev/ref/settings/#caches
-CACHES = {
-    "default": {
-        "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": REDIS_URL,
-        "OPTIONS": {
-            "CLIENT_CLASS": "django_redis.client.DefaultClient",
-            # Mimicing memcache behavior.
-            # http://niwinz.github.io/django-redis/latest/#_memcached_exceptions_behavior
-            "IGNORE_EXCEPTIONS": True,
+if CARE_USE_LOCMEM_CACHE:
+    CACHES = {
+        "default": {
+            "BACKEND": "config.caches.LocMemCache",
+            "LOCATION": "care-dev-cache",
         },
-    },
-    "swagger_cache": {  # In-memory cache (only for Swagger)
-        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-        "LOCATION": "swagger-schema-cache",
-    },
-}
+        "swagger_cache": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "swagger-schema-cache",
+        },
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": REDIS_URL,
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+                # Mimicing memcache behavior.
+                # http://niwinz.github.io/django-redis/latest/#_memcached_exceptions_behavior
+                "IGNORE_EXCEPTIONS": True,
+            },
+        },
+        "swagger_cache": {  # In-memory cache (only for Swagger)
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "swagger-schema-cache",
+        },
+    }
 
 # URLS
 # ------------------------------------------------------------------------------
@@ -454,17 +469,22 @@ HEALTHY_DJANGO = [
     DjangoDatabaseHealthCheck(
         "Database", slug="main_database", connection_name="default"
     ),
-    DjangoCacheHealthCheck("Cache", slug="main_cache", connection_name="default"),
-    DjangoCeleryQueueLengthHealthCheck(
-        "Celery Queue Length",
-        slug="celery_queue_length",
-        broker=REDIS_URL,
-        queue_name="celery",
-        info_length=50,
-        warning_length=0,  # this skips the 300 status code
-        alert_length=200,
-    ),
 ]
+
+# Only add Redis/Celery healthchecks when not in dev-lite mode
+if not CARE_USE_LOCMEM_CACHE:
+    HEALTHY_DJANGO.extend([
+        DjangoCacheHealthCheck("Cache", slug="main_cache", connection_name="default"),
+        DjangoCeleryQueueLengthHealthCheck(
+            "Celery Queue Length",
+            slug="celery_queue_length",
+            broker=REDIS_URL,
+            queue_name="celery",
+            info_length=50,
+            warning_length=0,  # this skips the 300 status code
+            alert_length=200,
+        ),
+    ])
 
 # Audit logs
 # ------------------------------------------------------------------------------
