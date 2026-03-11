@@ -1,8 +1,3 @@
-
-networks:
-  default:
-    name: care
-
 services:
   db:
     image: postgres:alpine

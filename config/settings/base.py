@@ -163,6 +163,14 @@ PLUGIN_CONFIGS = manager.get_config()
 # https://docs.djangoproject.com/en/dev/ref/settings/#installed-apps
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS + PLUGIN_APPS
 
+# Add care_medgemma plugin if installed (local dev package)
+try:
+    import care_medgemma  # noqa: F401
+    if "care_medgemma" not in INSTALLED_APPS:
+        INSTALLED_APPS += ["care_medgemma"]
+except ImportError:
+    pass
+
 # MIGRATIONS
 # ------------------------------------------------------------------------------
 # https://docs.djangoproject.com/en/dev/ref/settings/#migration-modules

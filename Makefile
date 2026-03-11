@@ -4,6 +4,7 @@
 DOCKER_VERSION := $(shell docker --version 2>/dev/null)
 
 docker_config_file := 'docker-compose.local.yaml'
+export COMPOSE_PROJECT_NAME ?= care_local
 
 all:
 ifndef DOCKER_VERSION
@@ -43,6 +44,9 @@ teardown:
 #TODO: remove alias load-dummy-data
 load-fixtures load-dummy-data:
 	docker compose exec backend bash -c "python manage.py load_fixtures"
+
+load-care-fixtures:
+	docker compose exec backend bash -c "python manage.py load_care_fixtures"
 
 list:
 	docker compose -f docker-compose.yaml -f $(docker_config_file) ps

@@ -45,7 +45,10 @@ make up
 # 3. Load initial data (admin accounts, fixtures)
 make load-fixtures
 
-# 4. Start frontend
+# 4. Load CARE patient data (Dr. Shivani + Devaganesh + reports → MinIO)
+make load-care-fixtures
+
+# 5. Start frontend
 cd ../care_fe
 npm install
 npm run dev
@@ -59,8 +62,9 @@ npm run dev
 
 ```bash
 cd care_be
-make up-lite        # Starts only: Postgres + MinIO + Backend
-make load-fixtures  # Load accounts & seed data
+make up-lite          # Starts only: Postgres + MinIO + Backend
+make load-fixtures    # Load accounts & seed data
+make load-care-fixtures  # Load Dr. Shivani + Devaganesh + 28 reports → MinIO
 
 cd ../care_fe
 npm install
@@ -68,6 +72,24 @@ npm run dev
 ```
 
 > **What changes?** Celery tasks execute inline (synchronously). Cache uses in-memory instead of Redis. Fewer containers = ~400MB less RAM.
+
+### Default Login Credentials
+
+| User | Username | Password | Role |
+|------|----------|----------|------|
+| Admin | `admin` | `admin` | Superuser |
+| Doctor | `dr-shivani` | `Coronasafe@123` | Doctor |
+| Dev Admin | `devdistrictadmin` | `Coronasafe@123` | District Admin |
+
+### Test Patient
+
+| Field | Value |
+|-------|-------|
+| Name | Devaganesh S |
+| ABHA ID | `91-1234-5678-9012` |
+| DOB | 1998-03-15 |
+| Blood Group | O+ |
+| Reports | 27 PDFs + 1 JPEG (uploaded to MinIO) |
 
 ---
 
@@ -431,11 +453,62 @@ care_medgemma/
 ├── serializers/
 │   └── medgemma.py      # Request/response serializers
 └── viewsets/
-    ├── medgemma.py      # AI analysis endpoints
+    ├── medgemma.py      # AI analysis endpoints (ABHA → MinIO → Ollama)
     ├── fhir_export.py   # FHIR R5 data export
     ├── consent.py       # Patient consent management
     └── audit_log.py     # Audit trail viewing
 ```
+
+### ABHA → MinIO → MedGemma Pipeline
+
+The main analysis pipeline works as follows:
+
+```
+  User enters ABHA ID (91-1234-5678-9012)
+       │
+       ▼
+  _resolve_patient()  →  Lookup by ABHA / UUID / Name
+       │
+       ▼
+  _pull_patient_files()  →  Query FileUpload records
+       │                     Download from MinIO (S3)
+       ▼
+  _extract_text_from_pdf()  →  PyPDF2 text extraction
+  base64 encode images      →  Image encoding
+       │
+       ▼
+  Build Ollama prompt  →  System prompt (preset) +
+       │                   Patient info + All file contents
+       ▼
+  Ollama /api/chat  →  Local AI inference (no cloud egress)
+       │
+       ▼
+  Structured response  →  Parse into summary, flags,
+                           findings, SOAP, trends, etc.
+```
+
+**Supported file types for analysis:**
+- Documents: PDF, TXT, CSV, DOC, XLS, XLSX, RTF, ODT
+- Images: JPEG, PNG, GIF, BMP, WebP, TIFF
+- All file types are handled — unknown types are read as text
+
+### How to Test MedGemma
+
+```bash
+# 1. Ensure fixtures are loaded
+cd care_be
+make load-fixtures
+make load-care-fixtures    # Uploads 28 patient reports to MinIO
+
+# 2. Open MedGemma in browser
+# http://localhost:4000/medgemma
+
+# 3. Enter ABHA ID: 91-1234-5678-9012
+# 4. Select a preset (e.g., Comprehensive)
+# 5. Click "Run Analysis"
+```
+
+The system will pull all 28 reports from MinIO, extract text from PDFs, and feed everything to the AI engine.
 
 ### API Endpoints
 
@@ -447,6 +520,26 @@ care_medgemma/
 | `/api/v1/fhir/export/{patient_id}/`      | GET    | Export patient data as FHIR R5    |
 | `/api/v1/consent/`                       | GET/POST| Manage patient consent records   |
 | `/api/v1/audit/`                         | GET    | View audit log                    |
+
+### Analyze Request Body
+
+```json
+{
+  "analysis_type": "comprehensive",
+  "patient_id": "91-1234-5678-9012",
+  "preset": "comprehensive",
+  "encounter_id": "",
+  "input_data": {}
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `analysis_type` | Yes | One of: `comprehensive`, `summary`, `critical`, `timeline`, `report_summary`, `trend_analysis`, `ddi_check`, `differential_diagnosis`, `soap_autofill` |
+| `patient_id` | No | ABHA ID, patient UUID, or patient name. Triggers MinIO file pull. |
+| `preset` | No | Overrides the prompt template. Options: `comprehensive`, `summary`, `critical`, `timeline` |
+| `encounter_id` | No | Links analysis to a specific clinical encounter |
+| `input_data` | No | Additional JSON clinical data to include in analysis |
 
 ### Analysis Types
 
@@ -466,6 +559,15 @@ care_medgemma/
 
 - **`MEDGEMMA_MOCK_MODE=True`** (default): Returns hardcoded clinical analysis. No external dependencies.
 - **`MEDGEMMA_MOCK_MODE=False`**: Connects to local Ollama server running MedGemma/CareAnalyzer model. Responses come from local AI inference — **no cloud egress**, fully private pipeline.
+
+### MedGemma Environment Variables
+
+| Variable | Default | Purpose |
+|----------|---------|--------|
+| `MEDGEMMA_MOCK_MODE` | `True` | Use mock or real Ollama engine |
+| `MEDGEMMA_OLLAMA_HOST` | `http://172.19.127.189:11434/api/chat` | Ollama server URL |
+| `MEDGEMMA_OLLAMA_MODEL` | `CareAnalyzer` | Ollama model name |
+| `MEDGEMMA_REQUEST_TIMEOUT` | `120` | Ollama request timeout (seconds) |
 
 ---
 
@@ -533,7 +635,8 @@ make up             # Start: db + redis + minio + celery + backend
 make list           # Shows container status
 
 # Run database migrations and load seed data
-make load-fixtures  # Creates admin account (admin/admin)
+make load-fixtures       # Creates admin account (admin/admin)
+make load-care-fixtures  # Creates Dr. Shivani + Devaganesh + uploads 28 reports to MinIO
 ```
 
 ### 3. Frontend Setup
@@ -553,10 +656,19 @@ The dev server starts at http://localhost:4000. It proxies API requests to http:
 ### 4. Login
 
 - **URL**: http://localhost:4000
-- **Username**: `devdistrictadmin`
-- **Password**: `Coronasafe@123`
+- **Doctor**: `dr-shivani` / `Coronasafe@123`
+- **Admin**: `devdistrictadmin` / `Coronasafe@123`
 
-### 5. Verify
+### 5. Test MedGemma (AI Analysis)
+
+```bash
+# Navigate to: http://localhost:4000/medgemma
+# Enter ABHA ID: 91-1234-5678-9012
+# Select "Comprehensive" → Click "Run Analysis"
+# System pulls 28 patient reports from MinIO → AI analysis
+```
+
+### 6. Verify
 
 ```bash
 # Backend health
@@ -594,6 +706,7 @@ make up-lite        # Starts: db + minio + backend (no redis, no celery)
 
 # Load seed data (migrations run automatically in start-dev-lite.sh)
 make load-fixtures
+make load-care-fixtures  # Dr. Shivani + Devaganesh + 28 reports → MinIO
 
 # Frontend (same as standard)
 cd ../care_fe
@@ -678,4 +791,20 @@ make teardown       # Remove all containers AND volumes
 make build          # Rebuild images
 make up             # or make up-lite
 make load-fixtures  # Re-seed data
+make load-care-fixtures  # Re-load Dr. Shivani + Devaganesh + reports
 ```
+
+### Makefile Reference
+
+| Command | Description |
+|---------|-------------|
+| `make up` | Start full stack (db + redis + minio + celery + backend) |
+| `make up-lite` | Start dev-lite (db + minio + backend, no Redis/Celery) |
+| `make down` | Stop full stack |
+| `make down-lite` | Stop dev-lite stack |
+| `make build` | Build Docker images |
+| `make load-fixtures` | Load base seed data (admin, roles, questionnaires) |
+| `make load-care-fixtures` | Load Dr. Shivani + patient Devaganesh + 28 reports → MinIO |
+| `make list` | Show running container status |
+| `make teardown` | Remove all containers AND volumes (full reset) |
+| `make logs` | Tail container logs |

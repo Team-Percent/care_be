@@ -108,5 +108,11 @@ if settings.DEBUG or not settings.IS_PRODUCTION:
         path("redoc/", SpectacularRedocView.as_view(url_name="schema"), name="redoc"),
     ]
 
+# Include MedGemma plugin URLs under /api/v1/
+try:
+    urlpatterns += [path("api/v1/", include("care_medgemma.urls"))]
+except ImportError:
+    pass  # care_medgemma not installed
+
 for plug in settings.PLUGIN_APPS:
     urlpatterns += [path(f"api/{plug}/", include(f"{plug}.urls"))]
