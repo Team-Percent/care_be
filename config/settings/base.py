@@ -42,6 +42,9 @@ SECRET_KEY = env(
 )
 # https://docs.djangoproject.com/en/dev/ref/settings/#allowed-hosts
 ALLOWED_HOSTS = env.json("DJANGO_ALLOWED_HOSTS", default=["*"])
+
+# UHI Switch Integration
+UHI_SWITCH_URL = env("UHI_SWITCH_URL", default="http://localhost:8000")
 # https://docs.djangoproject.com/en/dev/ref/settings/#debug
 DEBUG = env.bool("DJANGO_DEBUG", False)
 # Local time zone. Choices are
@@ -152,6 +155,7 @@ LOCAL_APPS = [
     "care.users",
     "care.audit_log",
     "care.emr",
+    "care.uhi",
 ]
 
 PLUGIN_APPS = manager.get_apps()

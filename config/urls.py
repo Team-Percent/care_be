@@ -63,6 +63,7 @@ urlpatterns = [
         name="change_password_view",
     ),
     path("api/v1/", include(api_router.urlpatterns)),
+    path("api/v1/uhi/", include("care.uhi.urls")),
     *static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT),
 ]
 
